@@ -21,8 +21,18 @@ func main() {
 	// 场景 A: 测试 Context 超时控制
 	contextBizHandler := http.HandlerFunc(handler.ContextHandler)
 	// 现在的调用链：Request -> Middleware(写Price) -> ContextHandler(写Body)
-	wrappedHandler := middleware.RajomonMiddleware(rajomonCtrl, contextBizHandler)
-	mux.Handle("/context", wrappedHandler)
+	wrappedContextHandler := middleware.RajomonMiddleware(rajomonCtrl, contextBizHandler)
+	mux.Handle("/context", wrappedContextHandler)
+
+	// --- 🆕 新增: 注册 MCP SSE 接口 ---
+    // 1. 创建 Handler
+	mcpHandler := http.HandlerFunc(handler.HandleMCP)
+	// 2. 包裹 Rajomon 中间件 (目前中间件还看不懂 SSE，下一步我们就要改造中间件)
+	wrappedMCPHandler := middleware.RajomonMiddleware(rajomonCtrl,mcpHandler)
+	// 3. 注册路由 (通常 LLM 风格是 /v1/chat/completions，这里演示简单用 /mcp/chat)
+	mux.Handle("/mcp/chat", wrappedMCPHandler)
+
+	
 
 	// 场景 B: 测试 Rajomon 价格反馈 (原 fankui_handler)
 	// myHandler := &handler.MyGovernanceHandler{Price: 10,}
