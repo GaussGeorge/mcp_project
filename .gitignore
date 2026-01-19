@@ -1,0 +1,40 @@
+# Go编译文件
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 二进制文件
+bin/
+dist/
+
+# 测试输出
+*.test
+*.out
+
+# 依赖目录
+vendor/
+
+# Go模块文件（但保留go.mod和go.sum）
+# go.sum 应该提交，它是依赖锁文件
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 环境变量文件
+.env
+.env.local
+
+# 日志文件
+*.log
+
+# 临时文件
+tmp/
