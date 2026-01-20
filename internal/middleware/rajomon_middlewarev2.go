@@ -65,13 +65,24 @@ func RajomonMiddleware(ctrl *controller.RajomonController, next http.Handler) ht
 		tokenUsageStr := w.Header().Get("X-Token-Usage")
 		tokenUsage := 0
 		if tokenUsageStr != "" {
-			tokenUsage, _ = strconv.Atoi(tokenUsageStr)
+			var err error
+			tokenUsage, err = strconv.Atoi(tokenUsageStr)
+			if err != nil {
+				fmt.Printf("⚠️ [中间件警报] 解析 Token Usage 失败: %v\n", err)
+				tokenUsage = 0
+			}
+		} else {
+			// 这可能是普通 HTTP 请求，不是 LLM 请求
+			// fmt.Println("ℹ️ [中间件] 本次响应未包含 Token Usage 数据")
 		}
 
 		//因为 SSE 是流式请求，next.ServeHTTP(w, r) 会一直阻塞直到流结束。
 		// 所以 latency := time.Since(start) 记录的将是整个流传输完成的时间（Session Duration）
 		// 调用升级后的 RecordMetrics
-		fmt.Printf("📊 [中间件报告] 耗时: %v, 消耗Token: %d\n", latency, tokenUsage)
+
+		if tokenUsage > 0 {
+			fmt.Printf("📊 [Rajomon 审计] ⏳ 耗时:%v | 🪙 Tokens:%d | ⚖️ 综合成本: 计算中...\n", latency, tokenUsage)
+		}
 		ctrl.RecordLatency(latency, tokenUsage)
 	})
 }

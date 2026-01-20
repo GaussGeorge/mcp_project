@@ -20,7 +20,7 @@ func main() {
 	myTokenBalance := 100 // 增加一点余额以便测试
 	lastKnownPrice := 0
 
-	for i := 1; i <= 1; i++ {
+	for i := 1; i <= 10; i++ {
 		fmt.Printf("\n--- 第 %d 次尝试 (SSE 流式请求) ---\n", i)
 
 		// 1. 本地拦截逻辑 (Rajomon 客户端侧)
@@ -69,7 +69,6 @@ func main() {
 				lastKnownPrice = newPrice
 			}
 		}
-		
 
 		// 5. 处理错误状态码
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -98,11 +97,10 @@ func main() {
 			line := scanner.Text()
 
 			// 1. 解析事件类型 (如 event: message 或 event: usage)
-			if strings.HasPrefix(line, "event:"){
-				currentEvent = strings.TrimSpace(strings.TrimPrefix(line,"event:"))
+			if strings.HasPrefix(line, "event:") {
+				currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 				continue
 			}
-
 
 			// SSE 格式通常是 "data: {json...}"
 			// 2. 解析数据内容 (data: {...})
@@ -115,14 +113,14 @@ func main() {
 					if err := json.Unmarshal([]byte(dataContent), &msg); err == nil {
 						fmt.Printf("   -> 📝 内容片段: %s\n", msg.Content)
 					}
-				}else if currentEvent == "usage" {
+				} else if currentEvent == "usage" {
 					// [重点] 解析 Token 消耗数据
 					var usage model.MockUsage
 					if err := json.Unmarshal([]byte(dataContent), &usage); err == nil {
-						fmt.Printf("   -> 💰 [成本核算] Prompt: %d, Completion: %d, Total: %d\n", 
+						fmt.Printf("   -> 💰 [成本核算] Prompt: %d, Completion: %d, Total: %d\n",
 							usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 					}
-				}else{
+				} else {
 					// 默认处理
 					fmt.Printf("   -> 未知数据: %s\n", dataContent)
 				}
@@ -133,7 +131,6 @@ func main() {
 				}
 			}
 		}
-
 
 		resp.Body.Close() // 只有在流结束或出错时才关闭
 		fmt.Printf("✅ 请求完成 ,⏱️ 总耗时: %v\n", time.Since(start))
