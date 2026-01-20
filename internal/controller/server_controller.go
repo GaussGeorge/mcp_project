@@ -10,45 +10,66 @@ type RajomonController struct {
 	mu           sync.RWMutex
 	CurrentPrice int
 
-	// --- EWMA 核心字段 ---
-	ewmaLaatency float64 // 当前的平均延迟 (毫秒)
-	alpha        float64 // 平滑因子
-	threshold    float64 // 目标阈值
+	// --- 多维指标 ---
+	ewmaLatency float64 // 平均延迟 (ms)
+	ewmaTokens  float64 // 平均 Token 消耗 (个)
+
+	// --- 权重配置 ---
+	alpha         float64 // 平滑因子
+	latencyWeight float64 // 延迟在定价中的权重（比如0.5）
+	tokenWeight   float64 // Token 消耗在定价中的权重（比如0.5）
+
+	baseThreshold float64 // 综合成本阈值
 }
 
 func NewController() *RajomonController {
 	return &RajomonController{
-		CurrentPrice: 5,   // 初始价格
-		ewmaLaatency: 0,   // 初始延迟
-		alpha:        0.2, // 权重：新数据占 20%，历史数据占 80%
-		threshold:    200, // 超过 200ms 就涨价
+		CurrentPrice:  5,   // 初始价格
+		ewmaLatency:   0,   // 初始延迟
+		ewmaTokens:    0,   // 初始化 Token 消耗
+		alpha:         0.2, // 权重：新数据占 20%，历史数据占 80%
+		latencyWeight: 0.5, // 延迟权重 50%
+		tokenWeight:   0.5, // Token 权重 50%
+		baseThreshold: 200, // 综合分超过 200 就涨价
 	}
 }
 
-// RecordLatency 是核心更新逻辑
-func (c *RajomonController) RecordLatency(latency time.Duration) {
+// RecordLatency 同时接收延迟和Token消耗
+func (c *RajomonController) RecordLatency(latency time.Duration, tokenCount int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// 1. 将纳秒转换为毫秒 float64
 	latencyMs := float64(latency.Milliseconds())
+	tokens := float64(tokenCount)
 
 	// 2. EWMA 公式：更新平均值
-	if c.ewmaLaatency == 0 {
-		c.ewmaLaatency = latencyMs // 第一次直接赋值
+	if c.ewmaLatency == 0 {
+		c.ewmaLatency = latencyMs // 第一次直接赋值
 	} else {
 		// 新平均值 = 0.2 * 本次耗时 + 0.8 * 旧平均值
-		c.ewmaLaatency = c.alpha*latencyMs + (1-c.alpha)*c.ewmaLaatency
+		c.ewmaLatency = c.alpha*latencyMs + (1-c.alpha)*c.ewmaLatency
 	}
 
-	// 3. 基于“平滑后”的延迟来定价
-	if c.ewmaLaatency > c.threshold {
+	// 3. EWMA 更新 Token 消耗
+	if c.ewmaTokens == 0 {
+		c.ewmaTokens = tokens
+	} else {
+		c.ewmaTokens = c.alpha*tokens + (1-c.alpha)*c.ewmaTokens
+	}
+
+	// 4. 计算综合得分
+	// 假设：1ms延迟 = 1分，1个Token = 1分 (你需要根据实际情况归一化)
+	compositeCost := (c.latencyWeight * c.ewmaLatency) + (c.tokenWeight * c.ewmaTokens)
+
+	// 5. 动态定价
+	if compositeCost > c.baseThreshold {
 		c.CurrentPrice++
-		fmt.Printf("📈 [Controller] 平均延迟 %.2fms > 阈值，涨价至 %d\n", c.ewmaLaatency, c.CurrentPrice)
-	} else if c.ewmaLaatency < c.threshold/2 && c.CurrentPrice > 1 {
-		// 如果延迟很低 (小于 100ms)，慢慢降价
+		fmt.Printf("📈 [Controller] 成本过高(Lat:%.0f, Tok:%.0f, Cost:%.0f) -> 涨价至 %d\n",
+			c.ewmaLatency, c.ewmaTokens, compositeCost, c.CurrentPrice)
+	} else if compositeCost < c.baseThreshold/2 && c.CurrentPrice > 1 {
 		c.CurrentPrice--
-		fmt.Printf("📉 [Controller] 平均延迟 %.2fms < 阈值/2，降价至 %d\n", c.ewmaLaatency, c.CurrentPrice)
+		fmt.Printf("📉 [Controller] 成本回落(Cost:%.0f) -> 降价至 %d\n", compositeCost, c.CurrentPrice)
 	}
 }
 

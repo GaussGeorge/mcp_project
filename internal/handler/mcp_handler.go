@@ -34,10 +34,18 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 
 	// 3. 模拟分段输出内容 (Chunks)
 	chunks := []string{"你好，", "这是一个", "基于", "Rajomon", "治理的", "模拟", "AI回复。"}
-	
-	// 模拟计算 Token 消耗
+
+	// [新增] 预计算 Token (为了给中间件透传数据)
+	// 在真实场景中，可能是在流结束时通过 HTTP Trailers 发送，
+	// 但为了简化，我们在 Mock 时预先算好放在 Header 里
 	totalPrompt := 20
-	totalCompletion := 0
+	totalCompletion := len(chunks) * 2 // 假设每个 chunk 2 token
+	totalUsage := totalPrompt + totalCompletion
+
+	// 🔥 [关键] 写入侧信道 Header，中间件会读这个！
+	w.Header().Set("X-Token-Usage", fmt.Sprintf("%d", totalUsage))
+
+	fmt.Println("[Mock LLM] 开始流式生成内容...")
 
 	for _, text := range chunks {
 		// 模拟思考延迟 (制造抖动，方便后续测试 Rajomon 的 EWMA 算法)
@@ -47,10 +55,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 		// 构造数据
 		respData := model.MockContent{Content: text}
 		sendSSE(w, "message", respData)
-		
-		// 累计 Token (假设每个词 2 token)
-		totalCompletion += 2
-		
+
 		// 🚀 立即推送给客户端
 		flusher.Flush()
 	}
@@ -59,7 +64,7 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	usageData := model.MockUsage{
 		PromptTokens:     totalPrompt,
 		CompletionTokens: totalCompletion,
-		TotalTokens:      totalPrompt + totalCompletion,
+		TotalTokens:      totalUsage,
 	}
 	sendSSE(w, "usage", usageData)
 	flusher.Flush()

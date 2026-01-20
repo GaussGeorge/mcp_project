@@ -53,14 +53,25 @@ func RajomonMiddleware(ctrl *controller.RajomonController, next http.Handler) ht
 		// --- 4. 计时 ---
 		start := time.Now()
 
-		// --- 5. 执行业务 ---
+		// --- 5. 执行业务 (Wrapper) ---
+		// 我们使用原始的 w 传入，因为 Header 是引用传递，
+		// Handler 里设置的 X-Token-Usage，我们在这里能读到
 		next.ServeHTTP(w, r)
 
-		// --- 6. [写大脑] 反馈延迟 ---
-		// 请求结束，把耗时汇报给 Controller
+		// --- 6. [写大脑] 采样多维数据 ---
 		latency := time.Since(start)
+
+		// [新增] 从侧信道获取 Token 消耗
+		tokenUsageStr := w.Header().Get("X-Token-Usage")
+		tokenUsage := 0
+		if tokenUsageStr != "" {
+			tokenUsage, _ = strconv.Atoi(tokenUsageStr)
+		}
+
 		//因为 SSE 是流式请求，next.ServeHTTP(w, r) 会一直阻塞直到流结束。
 		// 所以 latency := time.Since(start) 记录的将是整个流传输完成的时间（Session Duration）
-		ctrl.RecordLatency(latency)
+		// 调用升级后的 RecordMetrics
+		fmt.Printf("📊 [中间件报告] 耗时: %v, 消耗Token: %d\n", latency, tokenUsage)
+		ctrl.RecordLatency(latency, tokenUsage)
 	})
 }
