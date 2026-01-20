@@ -59,6 +59,8 @@ func RajomonMiddleware(ctrl *controller.RajomonController, next http.Handler) ht
 		// --- 6. [写大脑] 反馈延迟 ---
 		// 请求结束，把耗时汇报给 Controller
 		latency := time.Since(start)
+		//因为 SSE 是流式请求，next.ServeHTTP(w, r) 会一直阻塞直到流结束。
+		// 所以 latency := time.Since(start) 记录的将是整个流传输完成的时间（Session Duration）
 		ctrl.RecordLatency(latency)
 	})
 }
