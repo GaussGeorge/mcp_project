@@ -99,6 +99,7 @@ func main() {
 			// 1. 解析事件类型 (如 event: message 或 event: usage)
 			if strings.HasPrefix(line, "event:") {
 				currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+				fmt.Printf("   [Debug] 切换事件类型为: %s\n", currentEvent)
 				continue
 			}
 
@@ -116,19 +117,22 @@ func main() {
 				} else if currentEvent == "usage" {
 					// [重点] 解析 Token 消耗数据
 					var usage model.MockUsage
-					if err := json.Unmarshal([]byte(dataContent), &usage); err == nil {
+					err := json.Unmarshal([]byte(dataContent), &usage)
+					if err == nil {
 						fmt.Printf("   -> 💰 [成本核算] Prompt: %d, Completion: %d, Total: %d\n",
 							usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+					} else {
+						// 如果解析失败，打印出来
+						fmt.Printf("   ❌ [错误] Usage 解析失败: %v, 内容: %s\n", err, dataContent)
 					}
 				} else {
-					// 默认处理
-					fmt.Printf("   -> 未知数据: %s\n", dataContent)
+					// 打印当前未知的 Event 类型，帮助排查是否 currentEvent 没切过来
+					fmt.Printf("   -> 未知数据 (Event=%s): %s\n", currentEvent, dataContent)
 				}
-
-				// SSE 消息通常以空行结束，重置事件类型
-				if line == "" {
-					currentEvent = ""
-				}
+			}
+			// SSE 消息通常以空行结束，重置事件类型
+			if line == "" {
+				currentEvent = ""
 			}
 		}
 
