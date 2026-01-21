@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"rajomon-gateway/internal/metrics"
 	"sync"
 	"time"
 )
@@ -18,7 +19,6 @@ type RajomonController struct {
 	alpha         float64 // 平滑因子
 	latencyWeight float64 // 延迟在定价中的权重（比如0.5）
 	tokenWeight   float64 // Token 消耗在定价中的权重（比如0.5）
-
 	baseThreshold float64 // 综合成本阈值
 }
 
@@ -62,6 +62,9 @@ func (c *RajomonController) RecordLatency(latency time.Duration, tokenCount int)
 	// 假设：1ms延迟 = 1分，1个Token = 1分 (你需要根据实际情况归一化)
 	compositeCost := (c.latencyWeight * c.ewmaLatency) + (c.tokenWeight * c.ewmaTokens)
 
+	// [新增] 埋点：记录计算出的综合成本
+	metrics.CompositeCost.Set(compositeCost)
+
 	// 5. 动态定价
 	if compositeCost > c.baseThreshold {
 		c.CurrentPrice++
@@ -71,6 +74,9 @@ func (c *RajomonController) RecordLatency(latency time.Duration, tokenCount int)
 		c.CurrentPrice--
 		fmt.Printf("📉 [Controller] 成本回落(Cost:%.0f) -> 降价至 %d\n", compositeCost, c.CurrentPrice)
 	}
+
+	// [新增] 埋点：记录最新价格
+	metrics.CurrentPrice.Set(float64(c.CurrentPrice))
 }
 
 func (c *RajomonController) GetPrice() int {

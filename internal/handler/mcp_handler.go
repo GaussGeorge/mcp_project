@@ -45,8 +45,6 @@ func HandleMCP(w http.ResponseWriter, r *http.Request) {
 	// 🔥 [关键] 写入侧信道 Header，中间件会读这个！
 	w.Header().Set("X-Token-Usage", fmt.Sprintf("%d", totalUsage))
 
-	fmt.Println("[Mock LLM] 开始流式生成内容...")
-
 	for _, text := range chunks {
 		// 模拟思考延迟 (制造抖动，方便后续测试 Rajomon 的 EWMA 算法)
 		delay := time.Duration(rand.Intn(100)+50) * time.Millisecond

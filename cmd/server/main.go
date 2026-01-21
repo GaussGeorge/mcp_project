@@ -6,10 +6,14 @@ import (
 	"net/http"
 	"rajomon-gateway/internal/controller"
 	"rajomon-gateway/internal/handler"
+	"rajomon-gateway/internal/metrics"
 	"rajomon-gateway/internal/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
+	// [新增] 0. 初始化 Metrics
+	metrics.Init()
 
 	// 1. 创建一个独立的路由器 (Mux)
 	// 这是一个"干净"的路由表，不会被第三方库污染
@@ -24,7 +28,7 @@ func main() {
 	wrappedContextHandler := middleware.RajomonMiddleware(rajomonCtrl, contextBizHandler)
 	mux.Handle("/context", wrappedContextHandler)
 
-	// --- 🆕 新增: 注册 MCP SSE 接口 ---
+	// --- 注册 MCP SSE 接口 ---
     // 1. 创建 Handler
 	mcpHandler := http.HandlerFunc(handler.HandleMCP)
 	// 2. 包裹 Rajomon 中间件 (目前中间件还看不懂 SSE，下一步我们就要改造中间件)
@@ -32,7 +36,11 @@ func main() {
 	// 3. 注册路由 (通常 LLM 风格是 /v1/chat/completions，这里演示简单用 /mcp/chat)
 	mux.Handle("/mcp/chat", wrappedMCPHandler)
 
-	
+	// --- 🆕 新增: 注册 Prometheus Metrics 接口 ---
+	// Prometheus 会来这里拉取数据
+	mux.Handle("/metrics",promhttp.Handler())
+	fmt.Println("👀 Prometheus Metrics 已暴露在 /metrics")
+
 
 	// 场景 B: 测试 Rajomon 价格反馈 (原 fankui_handler)
 	// myHandler := &handler.MyGovernanceHandler{Price: 10,}

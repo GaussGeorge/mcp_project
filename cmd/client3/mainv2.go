@@ -20,7 +20,7 @@ func main() {
 	myTokenBalance := 100 // 增加一点余额以便测试
 	lastKnownPrice := 0
 
-	for i := 1; i <= 10; i++ {
+	for i := 1; i <= 3; i++ {
 		fmt.Printf("\n--- 第 %d 次尝试 (SSE 流式请求) ---\n", i)
 
 		// 1. 本地拦截逻辑 (Rajomon 客户端侧)
@@ -99,7 +99,7 @@ func main() {
 			// 1. 解析事件类型 (如 event: message 或 event: usage)
 			if strings.HasPrefix(line, "event:") {
 				currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-				fmt.Printf("   [Debug] 切换事件类型为: %s\n", currentEvent)
+				// fmt.Printf("   [Debug] 切换事件类型为: %s\n", currentEvent)
 				continue
 			}
 
