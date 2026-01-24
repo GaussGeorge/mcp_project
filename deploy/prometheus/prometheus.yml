@@ -1,9 +1,8 @@
 global:
   scrape_interval: 1s
 
-
 scrape_configs:
-  - job_name: 'rajomon-gateway'
+  - job_name: "rajomon-gateway"
     static_configs:
-    # host.docker.internal 允许容器访问宿主机的 localhost:8080
-    - targets: ['host.docker.internal:8080']
+      # 关键修改：直接使用 service name "gateway"
+      - targets: ["gateway:8080"]

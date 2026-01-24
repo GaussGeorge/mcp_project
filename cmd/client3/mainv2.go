@@ -20,7 +20,7 @@ func main() {
 	myTokenBalance := 100 // 增加一点余额以便测试
 	lastKnownPrice := 0
 
-	for i := 1; i <= 3; i++ {
+	for i := 1; i <= 20; i++ {
 		fmt.Printf("\n--- 第 %d 次尝试 (SSE 流式请求) ---\n", i)
 
 		// 1. 本地拦截逻辑 (Rajomon 客户端侧)

@@ -4,71 +4,109 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
 	"rajomon-gateway/internal/controller"
 	"rajomon-gateway/internal/handler"
 	"rajomon-gateway/internal/metrics"
 	"rajomon-gateway/internal/middleware"
+	"strings"
+	"sync/atomic"
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// SimpleLoadBalancer 简单的轮询负载均衡器
+type SimpleLoadBalancer struct {
+	backends []*url.URL
+	current  uint64
+}
+
+func NewLoadBalancer(targets []string) *SimpleLoadBalancer {
+	var backends []*url.URL
+	for _, target := range targets {
+		u, err := url.Parse(target)
+		if err != nil {
+			log.Fatalf("后端地址解析失败: %s", err)
+		}
+		backends = append(backends, u)
+	}
+	return &SimpleLoadBalancer{backends: backends}
+}
+
+// ServeHTTP 实现反向代理转发
+func (lb *SimpleLoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
+	if len(lb.backends) == 0 {
+		http.Error(w, "No backend available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// 1. 轮询算法选择后端
+	idx := atomic.AddUint64(&lb.current, 1) % uint64(len(lb.backends))
+	target := lb.backends[idx]
+
+	// 2. 创建反向代理
+	proxy := httputil.NewSingleHostReverseProxy(target)
+
+	// 修改请求头，确保 Host 正确
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = target.Host
+		// 可以在这里加一个 Header 标识经过了网关
+		req.Header.Set("X-Forwarded-By", "Rajomon-Gateway")
+	}
+
+	// 自定义错误处理 (比如后端挂了)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		fmt.Printf("❌ [LB] 转发失败 -> %s: %v\n", target.Host, err)
+		w.WriteHeader(http.StatusBadGateway)
+	}
+
+	fmt.Printf("🔀 [LB] 转发请求 -> %s\n", target.Host)
+	proxy.ServeHTTP(w, r)
+}
 
 func main() {
 	// [新增] 0. 初始化 Metrics
 	metrics.Init()
 
-	// 1. 创建一个独立的路由器 (Mux)
-	// 这是一个"干净"的路由表，不会被第三方库污染
+	// 1. 从环境变量获取后端列表
+	// 格式: "http://backend-1:8080,http://backend-2:8080"
+	backendEnv := os.Getenv("BACKEND_HOSTS")
+	if backendEnv == "" {
+		// 默认值，方便本地非Docker调试（假设本地起了backend在9001）
+		backendEnv = "http://localhost:9001"
+	}
+	targets := strings.Split(backendEnv, ",")
+
+	// 2. 初始化负载均衡器
+	lb := NewLoadBalancer(targets)
+	fmt.Printf("⚖️ 负载均衡器已就绪，后端节点: %v\n", targets)
+
+	// 3. 初始化控制器
 	rajomonCtrl := controller.NewController()
-	fmt.Println("🧠 Rajomon 控制器已启动 (EWMA 模式)")
 	mux := http.NewServeMux()
 
-	// 2. 注册路由
-	// 场景 A: 测试 Context 超时控制
-	contextBizHandler := http.HandlerFunc(handler.ContextHandler)
-	// 现在的调用链：Request -> Middleware(写Price) -> ContextHandler(写Body)
-	wrappedContextHandler := middleware.RajomonMiddleware(rajomonCtrl, contextBizHandler)
-	mux.Handle("/context", wrappedContextHandler)
+	// 4. 组装核心链路: Client -> Rajomon Middleware -> LoadBalancer -> Backend
+	// 注意：我们把 lb 当作 next handler 传给 Middleware
+	wrappedLB := middleware.RajomonMiddleware(rajomonCtrl, lb)
 
-	// --- 注册 MCP SSE 接口 ---
-    // 1. 创建 Handler
-	mcpHandler := http.HandlerFunc(handler.HandleMCP)
-	// 2. 包裹 Rajomon 中间件 (目前中间件还看不懂 SSE，下一步我们就要改造中间件)
-	wrappedMCPHandler := middleware.RajomonMiddleware(rajomonCtrl,mcpHandler)
-	// 3. 注册路由 (通常 LLM 风格是 /v1/chat/completions，这里演示简单用 /mcp/chat)
-	mux.Handle("/mcp/chat", wrappedMCPHandler)
+	// 注册路由
+	mux.Handle("/mcp/chat", wrappedLB)
+
+	// 保留 context 测试接口
+	contextBizHandler := http.HandlerFunc(handler.ContextHandler)
+	mux.Handle("/context", middleware.RajomonMiddleware(rajomonCtrl, contextBizHandler))
 
 	// --- 🆕 新增: 注册 Prometheus Metrics 接口 ---
 	// Prometheus 会来这里拉取数据
-	mux.Handle("/metrics",promhttp.Handler())
+	mux.Handle("/metrics", promhttp.Handler())
 	fmt.Println("👀 Prometheus Metrics 已暴露在 /metrics")
 
-
-	// 场景 B: 测试 Rajomon 价格反馈 (原 fankui_handler)
-	// myHandler := &handler.MyGovernanceHandler{Price: 10,}
-	// mux.Handle("/price", myHandler)
-
-	// 场景 C: 带有中间件的业务逻辑处理器
-	// // 步骤 1: 实例化“内层”业务逻辑
-	// bizHandler := &handler.RealBizHandler{}
-	// // 步骤 2: 实例化“外层”中间件，并把内层塞进去
-	// // 这就是“俄罗斯套娃”的关键一步
-	// wrappedHandler := &handler.RajomonMiddleware{
-	// 	Next: bizHandler,
-	// }
-	// // 步骤 3: 注册路由
-	// // 注意：我们要把 wrappedHandler (最外层) 给 Server
-	// // 如果你只给 bizHandler，那 Rajomon 的逻辑就不会执行
-	// http.Handle("/mcp", wrappedHandler)
-
-	// Handle 是面向**接口（Interface）**的，适合复杂的、需要状态的场景。
-	// 参数: 接收一个实现了 http.Handler 接口的对象。
-	// 接口定义: 该对象必须实现 ServeHTTP(w http.ResponseWriter, r *http.Request) 方法。
-	// 适用场景: 当你的处理器（Handler）需要维护状态（例如数据库连接池、配置信息、缓存）时，通常会定义一个结构体（Struct），让它实现 http.Handler 接口，然后用 Handle 注册。
-
-	// HandleFunc 是面向**函数（Function）**的，适合简单的、无状态的逻辑。
-	// 参数: 接收一个具有特定签名的函数：func(w http.ResponseWriter, r *http.Request)。
-	// 适用场景: 当你的逻辑非常简单，不需要维护额外的状态，或者你只是想快速写一个 API 时，使用函数会更简洁。
-
-	// 3. 启动服务
+	// 5. 启动服务
 	addr := ":8080"
 	fmt.Printf("🚀 rajomon 服务端已启动，监听 %s\n", addr)
 	// 这里传入 mux，而不是 nil
@@ -79,5 +117,4 @@ func main() {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal("启动失败", err)
 	}
-
 }
