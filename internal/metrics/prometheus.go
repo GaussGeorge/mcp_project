@@ -36,19 +36,21 @@ var (
 	)
 
 	// 4. 仪表盘：当前服务的价格 (这是 Rajomon 的核心)
-	CurrentPrice = prometheus.NewGauge(
+	CurrentPrice = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "rajomon_current_price",
 			Help: "Current dynamic price of the service",
 		},
+		[]string{"handler"}, // 增加 handler 标签
 	)
 
 	// 5. 仪表盘：当前综合成本 (帮助调试 EWMA 算法)
-	CompositeCost = prometheus.NewGauge(
+	CompositeCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "rajomon_composite_cost",
 			Help: "Current calculated composite cost (latency + tokens)",
 		},
+		[]string{"handler"}, // 增加 handler 标签
 	)
 )
 

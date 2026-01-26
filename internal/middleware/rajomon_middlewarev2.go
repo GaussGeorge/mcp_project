@@ -14,13 +14,15 @@ import (
 
 func RajomonMiddleware(ctrl *controller.RajomonController, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 🔥 策略实现：接口粒度控制
+		// 我们使用 URL Path 作为资源的唯一标识 (Key)
+		// 这样 "/mcp/chat" 和 "/mcp/image" 会有独立的价格体系，互不干扰
 		path := r.URL.Path // 用作 metrics 的 label
 
-		// 1. 获取最新价格
-		price := ctrl.GetPrice()
+		// 1. 获取该接口的最新价格 (传入 Key)
+		price := ctrl.GetPrice(path)
 
-		// 2. 无论成功失败，先贴上价格标签 (Piggybacking)
-		// 这是 Rajomon 的灵魂：通过报错来传播价格信息
+		// 2. 价格回传 (Piggybacking) - 告知客户端当前接口的价格
 		w.Header().Set("Price", fmt.Sprintf("%d", price))
 
 		// 策略 B: 随机概率回传 (进阶优化，论文提到的点)
@@ -38,7 +40,7 @@ func RajomonMiddleware(ctrl *controller.RajomonController, next http.Handler) ht
 		tokenStr := r.Header.Get("Token")
 		clientToken, _ := strconv.Atoi(tokenStr)
 
-		// 4. 【关键】准入检查 (token < price)
+		// 4. 准入检查
 		if tokenStr == "" {
 			// [新增] 埋点：记录被拒绝的请求 (No Token)
 			metrics.RequestsTotal.WithLabelValues("rejected_no_token", path).Inc()
@@ -59,21 +61,17 @@ func RajomonMiddleware(ctrl *controller.RajomonController, next http.Handler) ht
 		// [新增] 埋点：记录被接受的请求
 		metrics.RequestsTotal.WithLabelValues("accepted", path).Inc()
 
-		// --- 4. 计时 ---
 		start := time.Now()
 
-		// --- 5. 执行业务 (Wrapper) ---
-		// 我们使用原始的 w 传入，因为 Header 是引用传递，
-		// Handler 里设置的 X-Token-Usage，我们在这里能读到
+		// 5. 执行业务 (Wrapper)
 		next.ServeHTTP(w, r)
 
-		// --- 6. [写大脑] 采样多维数据 ---
+		// 6. 采样数据
 		latency := time.Since(start)
-
-		// [新增] 埋点：记录请求耗时 (秒)
+		// 埋点：记录请求耗时 (秒)
 		metrics.RequestLatency.WithLabelValues(path).Observe(latency.Seconds())
 
-		// [新增] 从侧信道获取 Token 消耗
+		// 从响应头中获取后端回传的 Token 消耗
 		tokenUsageStr := w.Header().Get("X-Token-Usage")
 		tokenUsage := 0
 		if tokenUsageStr != "" {
@@ -95,8 +93,9 @@ func RajomonMiddleware(ctrl *controller.RajomonController, next http.Handler) ht
 		if tokenUsage > 0 {
 			// [新增] 埋点：记录 Token 消耗
 			metrics.TokenUsage.WithLabelValues(path).Observe(float64(tokenUsage))
-			fmt.Printf("📊 [Rajomon 审计] ⏳ 耗时:%v | 🪙 Tokens:%d | ⚖️ 综合成本: 计算中...\n", latency, tokenUsage)
+			fmt.Printf("📊 [审计][%s] ⏳latency %.2fms | tokenUsage %d | ⚖️ 触发定价计算...\n",
+				path, float64(latency.Milliseconds()), tokenUsage)
 		}
-		ctrl.RecordLatency(latency, tokenUsage)
+		ctrl.RecordLatency(path, latency, tokenUsage)
 	})
 }
